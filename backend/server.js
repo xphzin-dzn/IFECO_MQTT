@@ -7,7 +7,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- 1. CONFIGURAÇÃO DO BANCO DE DADOS ---
+
 const db = mysql.createConnection({
     host: 'localhost',
     user: 'root',
