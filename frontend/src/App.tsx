@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { Zap, Activity, Thermometer, Gauge, LogOut, Play, Square, Save, Menu } from 'lucide-react';
+import { 
+  Zap, Activity, Thermometer, Gauge, LogOut, Play, Square, Save, Menu, Settings as SettingsIcon 
+} from 'lucide-react';
 import './App.css';
 import Login from './Login';
-import History from './History'; // <--- Importar a nova tela
+import History from './History'; 
+import Settings from './Settings';
 
-const API_URL = 'http://localhost:3001'; 
+// CONFIGURAÇÃO DO IP (Para funcionar no celular)
+const API_URL = 'http://192.168.0.9:3001'; 
 
 interface DadosSensor {
   id: number;
@@ -20,7 +24,7 @@ function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('userToken'));
   
   // --- NAVEGAÇÃO ---
-  const [currentScreen, setCurrentScreen] = useState<'dashboard' | 'history'>('dashboard');
+  const [currentScreen, setCurrentScreen] = useState<'dashboard' | 'history' | 'settings'>('dashboard');
 
   // --- ESTADOS DO DASHBOARD ---
   const [data, setData] = useState<DadosSensor[]>([]);
@@ -28,8 +32,10 @@ function App() {
   const [gravando, setGravando] = useState(false);
   const [horaInicio, setHoraInicio] = useState<string | null>(null);
 
+  // Configura o Axios para enviar o Token em todas as requisições
   if (token) axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
+  // Função para corrigir o fuso horário
   const pegarHoraLocal = () => {
     const agora = new Date();
     const offset = agora.getTimezoneOffset() * 60000;
@@ -38,21 +44,28 @@ function App() {
 
   useEffect(() => {
     if (!token) return;
+    
     const fetchData = async () => {
       try {
         const response = await axios.get<DadosSensor[]>(`${API_URL}/api/telemetria`);
         setData(response.data);
       } catch (error) {
+        // Se o token for inválido ou expirado, faz logout
         if (axios.isAxiosError(error) && (error.response?.status === 401)) logout();
       }
     };
-    const interval = setInterval(fetchData, 1000);
-    return () => clearInterval(interval);
-  }, [token]);
+
+    // Só busca dados em tempo real se estivermos vendo o Dashboard
+    if (currentScreen === 'dashboard') {
+        const interval = setInterval(fetchData, 1000);
+        return () => clearInterval(interval);
+    }
+  }, [token, currentScreen]);
 
   const logout = () => {
     setToken(null);
     localStorage.removeItem('userToken');
+    setCurrentScreen('dashboard'); // Reseta a tela
   };
 
   const alternarMotor = async () => {
@@ -62,20 +75,20 @@ function App() {
     } catch (error) { alert('Erro ao enviar comando!'); }
   };
 
-  // --- NOVA LÓGICA DE GRAVAÇÃO (Salva no Backend) ---
   const gerenciarGravacao = async () => {
     if (!gravando) {
       // INICIAR
       setHoraInicio(pegarHoraLocal());
       setGravando(true);
     } else {
-      // PARAR E SALVAR
+      // PARAR E SALVAR NO HISTÓRICO
       const horaFim = pegarHoraLocal();
       setGravando(false);
       
       const nomeSessao = prompt("Nome da Sessão (Opcional):", `Sessão ${new Date().toLocaleTimeString()}`);
       
       try {
+        // O backend vai pegar o ID do usuário automaticamente pelo Token
         await axios.post(`${API_URL}/api/sessions`, {
             nome: nomeSessao,
             inicio: horaInicio,
@@ -88,13 +101,15 @@ function App() {
     }
   };
 
+  // Se não tiver token, mostra a tela de Login
   if (!token) return <Login setToken={(t) => { setToken(t); localStorage.setItem('userToken', t); }} />;
 
+  // Pega o último dado para os cards (ou zeros se não tiver dados)
   const ultimoDado = data.length > 0 ? data[data.length - 1] : { velocidade: 0, tensao: 0, corrente: 0, temperatura: 0 };
 
   return (
     <div className="app-layout">
-      {/* SIDEBAR */}
+      {/* --- SIDEBAR LATERAL --- */}
       <aside className="sidebar">
         <div className="brand">
           <Zap size={28} /> IFECO IoT
@@ -112,6 +127,12 @@ function App() {
           >
             <Activity size={20} /> Histórico
           </div>
+          <div 
+            className={`nav-item ${currentScreen === 'settings' ? 'active' : ''}`}
+            onClick={() => setCurrentScreen('settings')}
+          >
+            <SettingsIcon size={20} /> Configurações
+          </div>
           
           <button className="nav-item logout-btn" onClick={logout}>
             <LogOut size={20} /> Sair
@@ -119,15 +140,26 @@ function App() {
         </nav>
       </aside>
 
-      {/* ÁREA PRINCIPAL */}
+      {/* --- CONTEÚDO PRINCIPAL --- */}
       <main className="main-content">
         
-        {/* Renderiza a tela escolhida */}
         {currentScreen === 'history' ? (
+            // TELA 1: HISTÓRICO
             <History />
-        ) : (
+        ) : currentScreen === 'settings' ? (
+            // TELA 2: CONFIGURAÇÕES
             <>
-                {/* CONTEÚDO DO DASHBOARD */}
+                <header className="top-header">
+                  <div className="page-title">
+                    <h1>Configurações do Sistema</h1>
+                    <span>Segurança e preferências da conta</span>
+                  </div>
+                </header>
+                <Settings logout={logout} />
+            </>
+        ) : (
+            // TELA 3: DASHBOARD (PADRÃO)
+            <>
                 <header className="top-header">
                   <div className="page-title">
                     <h1>Monitoramento em Tempo Real</h1>
@@ -153,6 +185,7 @@ function App() {
                 </header>
 
                 <div className="grid-container">
+                  {/* Card Velocidade */}
                   <div className="card">
                     <div className="card-header">
                       <div className="card-title"><Gauge size={20} /> Velocidade</div>
@@ -173,6 +206,7 @@ function App() {
                     </ResponsiveContainer>
                   </div>
 
+                  {/* Card Tensão */}
                   <div className="card">
                     <div className="card-header">
                       <div className="card-title"><Zap size={20} /> Tensão</div>
@@ -187,6 +221,7 @@ function App() {
                     </ResponsiveContainer>
                   </div>
 
+                  {/* Card Corrente */}
                   <div className="card">
                     <div className="card-header">
                       <div className="card-title"><Activity size={20} /> Corrente</div>
@@ -201,6 +236,7 @@ function App() {
                     </ResponsiveContainer>
                   </div>
 
+                  {/* Card Temperatura */}
                   <div className="card">
                     <div className="card-header">
                       <div className="card-title"><Thermometer size={20} /> Temperatura</div>

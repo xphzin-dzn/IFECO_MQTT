@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { LogIn, UserPlus, Zap } from 'lucide-react'; // Ícones novos
+import { LogIn, UserPlus, Zap } from 'lucide-react'; 
 import './App.css';
+
+// --- CONFIGURAÇÃO DO IP ---
+// Definimos a constante fora do componente
+const API_URL = 'http://192.168.0.9:3001'; 
 
 interface LoginProps {
     setToken: (token: string) => void;
@@ -15,8 +19,12 @@ const Login: React.FC<LoginProps> = ({ setToken }) => {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const endpoint = isRegister ? '/auth/register' : '/auth/login';
+        
         try {
-            const res = await axios.post(`http://localhost:3001${endpoint}`, { email, password });
+            // --- CORREÇÃO AQUI ---
+            // Usamos a constante definida lá em cima + o endpoint
+            const res = await axios.post(`${API_URL}${endpoint}`, { email, password });
+            
             if (isRegister) {
                 alert("Conta criada com sucesso! Faça login.");
                 setIsRegister(false);
@@ -25,7 +33,7 @@ const Login: React.FC<LoginProps> = ({ setToken }) => {
                 localStorage.setItem('userToken', res.data.token);
             }
         } catch (error) {
-            alert("Erro na operação. Verifique seus dados.");
+            alert("Erro na operação. Verifique seus dados ou a conexão com o servidor.");
         }
     };
 

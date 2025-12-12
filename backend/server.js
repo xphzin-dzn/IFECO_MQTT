@@ -1,11 +1,11 @@
-require('dotenv').config(); // Carrega as variaveis do .env
+require('dotenv').config();
 const express = require('express');
 const { Sequelize, DataTypes } = require('sequelize');
 const mqtt = require('mqtt');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const authMiddleware = require('./middleware/auth'); // Nosso porteiro
+const authMiddleware = require('./middleware/auth');
 
 const app = express();
 app.use(cors());
@@ -15,15 +15,18 @@ app.use(express.json());
 const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, {
     host: process.env.DB_HOST,
     dialect: 'mysql',
-    logging: false // Desliga logs chatos no terminal
+    logging: false
 });
 
 // --- IMPORTAR MODELOS ---
 const User = require('./models/User')(sequelize);
-// IMPORTANTE: Importamos o modelo de Sessão que criamos
 const Session = require('./models/Session')(sequelize); 
 
-// Definindo modelo de Leituras via Sequelize
+// [NOVO] RELACIONAMENTO: Uma Sessão pertence a um Usuário
+User.hasMany(Session);
+Session.belongsTo(User);
+
+// Definindo modelo de Leituras
 const Leitura = sequelize.define('Leitura', {
     velocidade: DataTypes.FLOAT,
     tensao: DataTypes.FLOAT,
@@ -32,8 +35,8 @@ const Leitura = sequelize.define('Leitura', {
     data_hora: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
 }, { timestamps: false, tableName: 'leituras' });
 
-// Sincroniza o banco (Cria as tabelas Users, Sessions e Leituras se não existirem)
-sequelize.sync().then(() => console.log('Banco de Dados Sincronizado!'));
+// Sincroniza o banco (Use alter: true para tentar atualizar a tabela sem apagar dados)
+sequelize.sync({ alter: true }).then(() => console.log('Banco de Dados Sincronizado!'));
 
 // --- 2. MQTT ---
 const mqttClient = mqtt.connect('mqtt://test.mosquitto.org');
@@ -53,7 +56,7 @@ mqttClient.on('message', async (topic, message) => {
     }
 });
 
-// --- 3. ROTAS DE AUTENTICAÇÃO (Públicas) ---
+// --- 3. ROTAS DE AUTENTICAÇÃO ---
 
 app.post('/auth/register', async (req, res) => {
     const { email, password } = req.body;
@@ -83,6 +86,31 @@ app.post('/auth/login', async (req, res) => {
     }
 });
 
+// [NOVO] Rota para Alterar Senha
+app.post('/auth/change-password', authMiddleware, async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.userId; 
+
+    try {
+        const user = await User.findByPk(userId);
+        if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+        const isValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isValid) {
+            return res.status(401).json({ error: "A senha atual está incorreta." });
+        }
+
+        const hashNewPassword = await bcrypt.hash(newPassword, 10);
+        user.password = hashNewPassword;
+        await user.save();
+
+        res.json({ message: "Senha alterada com sucesso!" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Erro ao atualizar senha." });
+    }
+});
+
 // --- 4. ROTAS PROTEGIDAS (DASHBOARD) ---
 
 app.get('/api/telemetria', authMiddleware, async (req, res) => {
@@ -96,35 +124,24 @@ app.get('/api/telemetria', authMiddleware, async (req, res) => {
 app.post('/api/comando', authMiddleware, (req, res) => {
     const { acao } = req.body;
     mqttClient.publish(TOPICO_COMANDO, acao);
-    res.json({ status: 'Comando enviado por usuário autenticado' });
+    res.json({ status: 'Comando enviado' });
 });
 
-// Rota antiga de exportação (ainda útil se quiser baixar JSON direto sem salvar sessão)
-app.get('/api/exportar', authMiddleware, async (req, res) => {
-    const { inicio, fim } = req.query;
-    const { Op } = require('sequelize'); 
-    
-    const dados = await Leitura.findAll({
-        where: {
-            data_hora: { [Op.between]: [inicio, fim] }
-        }
-    });
-    res.json(dados);
-});
+// --- 5. ROTAS DE HISTÓRICO (CORRIGIDAS PARA FILTRAR POR USUÁRIO) ---
 
-// --- 5. ROTAS DE HISTÓRICO (NOVAS) ---
-
-// A. Salvar uma nova sessão no banco
+// A. Salvar uma nova sessão (VINCULANDO AO USUÁRIO)
 app.post('/api/sessions', authMiddleware, async (req, res) => {
     const { nome, inicio, fim } = req.body;
+    const userId = req.userId; // [NOVO] Pegamos o ID do usuário logado pelo token
+
     try {
-        // Se o usuário não digitar nome, cria um automático
         const nomeFinal = nome || `Sessão de ${new Date(inicio).toLocaleString('pt-BR')}`;
         
         const sessao = await Session.create({ 
             nome: nomeFinal,
             data_inicio: inicio, 
-            data_fim: fim 
+            data_fim: fim,
+            UserId: userId // [NOVO] Salvamos quem é o dono da sessão
         });
         res.json(sessao);
     } catch (err) {
@@ -133,34 +150,46 @@ app.post('/api/sessions', authMiddleware, async (req, res) => {
     }
 });
 
-// B. Listar todas as sessões para a barra lateral
+// B. Listar APENAS as sessões do usuário logado
 app.get('/api/sessions', authMiddleware, async (req, res) => {
+    const userId = req.userId; // [NOVO] ID do usuário
+
     try {
-        const sessoes = await Session.findAll({ order: [['data_inicio', 'DESC']] });
+        const sessoes = await Session.findAll({ 
+            where: { UserId: userId }, // [NOVO] Filtro mágico: Só traz se for desse usuário
+            order: [['data_inicio', 'DESC']] 
+        });
         res.json(sessoes);
     } catch (err) {
         res.status(500).json({ error: "Erro ao listar sessões" });
     }
 });
 
-// C. Pegar os dados de sensores de UMA sessão específica (para o gráfico)
+// C. Pegar os dados de UMA sessão específica (Validando se pertence ao usuário)
 app.get('/api/sessions/:id/dados', authMiddleware, async (req, res) => {
     const { id } = req.params;
+    const userId = req.userId;
     const { Op } = require('sequelize');
     
     try {
-        // 1. Acha a sessão para saber a hora de inicio e fim
-        const sessao = await Session.findByPk(id);
-        if (!sessao) return res.status(404).json({ error: "Sessão não encontrada" });
+        // 1. Busca a sessão e verifica se pertence ao usuário
+        const sessao = await Session.findOne({ 
+            where: { 
+                id: id,
+                UserId: userId // [NOVO] Garante que não posso ver sessão dos outros
+            } 
+        });
 
-        // 2. Busca na tabela de Leituras tudo que aconteceu nesse intervalo
+        if (!sessao) return res.status(404).json({ error: "Sessão não encontrada ou acesso negado" });
+
+        // 2. Busca os dados (Leituras são gerais, filtradas pelo tempo da sessão)
         const dados = await Leitura.findAll({
             where: {
                 data_hora: {
                     [Op.between]: [sessao.data_inicio, sessao.data_fim]
                 }
             },
-            order: [['data_hora', 'ASC']] // Ordem cronológica para o gráfico
+            order: [['data_hora', 'ASC']]
         });
         
         res.json(dados);
