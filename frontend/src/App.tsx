@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { 
+  LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
+} from 'recharts';
+import { 
+  Zap, Activity, Thermometer, Gauge, LogOut, Play, Square, Download, Menu, Wifi 
+} from 'lucide-react';
 import './App.css';
-import Login from './Login'; // <--- IMPORTANTE: Importa a tela de login
+import Login from './Login';
 
-// Se for testar no PC, use localhost. Se for no celular, coloque o IP (ex: 192.168.0.7)
 const API_URL = 'http://localhost:3001'; 
 
 interface DadosSensor {
@@ -13,220 +17,192 @@ interface DadosSensor {
   tensao: number;
   corrente: number;
   temperatura: number;
-  data_hora?: string;
 }
 
 function App() {
-  // --- ESTADO DE AUTENTICAÇÃO ---
-  // Tenta pegar o token salvo na memória do navegador
   const [token, setToken] = useState<string | null>(localStorage.getItem('userToken'));
-
-  // --- ESTADOS DO DASHBOARD ---
   const [data, setData] = useState<DadosSensor[]>([]);
   const [motorLigado, setMotorLigado] = useState(false);
   const [gravando, setGravando] = useState(false);
   const [horaInicio, setHoraInicio] = useState<string | null>(null);
 
-  // --- CONFIGURAÇÃO DE SEGURANÇA ---
-  if (token) {
-    // Se tem token, avisa o Axios para mandar ele em TODAS as requisições
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-  }
+  if (token) axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-  // --- FUNÇÃO AUXILIAR DE DATA (CORREÇÃO DE FUSO HORÁRIO) ---
   const pegarHoraLocal = () => {
     const agora = new Date();
     const offset = agora.getTimezoneOffset() * 60000;
-    const dataLocal = new Date(agora.getTime() - offset);
-    return dataLocal.toISOString().slice(0, 19).replace('T', ' ');
+    return new Date(agora.getTime() - offset).toISOString().slice(0, 19).replace('T', ' ');
   };
 
-  // --- MONITORAMENTO (Só roda se estiver logado) ---
   useEffect(() => {
-    if (!token) return; // Se não tem token, não busca dados
-
+    if (!token) return;
     const fetchData = async () => {
       try {
         const response = await axios.get<DadosSensor[]>(`${API_URL}/api/telemetria`);
         setData(response.data);
       } catch (error) {
-        console.error("Erro ao buscar dados. Token expirado?", error);
-        // Se der erro de autorização (401/403), desloga o usuário
-        if (axios.isAxiosError(error) && (error.response?.status === 401 || error.response?.status === 403)) {
-            logout();
-        }
+        if (axios.isAxiosError(error) && (error.response?.status === 401)) logout();
       }
     };
-    
     const interval = setInterval(fetchData, 1000);
     return () => clearInterval(interval);
   }, [token]);
 
-  // --- AÇÕES DO SISTEMA ---
-
   const logout = () => {
     setToken(null);
     localStorage.removeItem('userToken');
-    // Remove o header para garantir
-    delete axios.defaults.headers.common['Authorization'];
   };
 
   const alternarMotor = async () => {
-    const novaAcao = motorLigado ? 'DESLIGAR' : 'LIGAR';
     try {
-      await axios.post(`${API_URL}/api/comando`, { acao: novaAcao });
+      await axios.post(`${API_URL}/api/comando`, { acao: motorLigado ? 'DESLIGAR' : 'LIGAR' });
       setMotorLigado(!motorLigado);
-    } catch (error) {
-      alert('Erro ao enviar comando! Você tem permissão?');
-    }
+    } catch (error) { alert('Erro ao enviar comando!'); }
   };
 
   const gerenciarGravacao = async () => {
     if (!gravando) {
-      // INICIAR: Usa hora local corrigida
-      const agora = pegarHoraLocal();
-      setHoraInicio(agora);
+      setHoraInicio(pegarHoraLocal());
       setGravando(true);
     } else {
-      // PARAR
       const horaFim = pegarHoraLocal();
       setGravando(false);
-      
       try {
-        const response = await axios.get(`${API_URL}/api/exportar`, {
-          params: { inicio: horaInicio, fim: horaFim }
-        });
-
-        const dadosDaSessao = response.data;
-
-        if (!dadosDaSessao || dadosDaSessao.length === 0) {
-          alert("Nenhum dado capturado nesta sessão. (Verifique se o ESP32 está ligado)");
-          return;
-        }
-
-        // Download do JSON
-        const jsonString = JSON.stringify(dadosDaSessao, null, 2);
-        const blob = new Blob([jsonString], { type: "application/json" });
-        const href = URL.createObjectURL(blob);
+        const response = await axios.get(`${API_URL}/api/exportar`, { params: { inicio: horaInicio, fim: horaFim } });
+        if (!response.data.length) return alert("Nenhum dado capturado.");
+        
+        const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
         const link = document.createElement("a");
-        link.href = href;
+        link.href = URL.createObjectURL(blob);
         link.download = `sessao_${horaFim.replace(/:/g, '-')}.json`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-
-      } catch (error) {
-        console.error("Erro ao exportar:", error);
-        alert("Erro ao exportar dados.");
-      }
+      } catch (error) { alert("Erro ao exportar."); }
     }
   };
 
-  // --- RENDERIZAÇÃO CONDICIONAL ---
-  
-  // 1. Se NÃO tem token, mostra LOGIN
-  if (!token) {
-    return <Login setToken={(t) => {
-        setToken(t);
-        localStorage.setItem('userToken', t);
-    }} />;
-  }
+  if (!token) return <Login setToken={(t) => { setToken(t); localStorage.setItem('userToken', t); }} />;
 
-  // 2. Se TEM token, mostra DASHBOARD
+  // Pega o último dado para mostrar o valor atual
+  const ultimoDado = data.length > 0 ? data[data.length - 1] : { velocidade: 0, tensao: 0, corrente: 0, temperatura: 0 };
+
   return (
-    <div className="dashboard-container">
-      <div className="header" style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-        <h1>Sistema Supervisório ESP32</h1>
-        <button 
-            onClick={logout}
-            style={{
-                background: '#ff4d4d', 
-                color: 'white', 
-                border: 'none', 
-                padding: '8px 15px', 
-                borderRadius: '5px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-            }}
-        >
-            SAIR
-        </button>
-      </div>
+    <div className="app-layout">
+      {/* SIDEBAR LATERAL */}
+      <aside className="sidebar">
+        <div className="brand">
+          <Zap size={28} /> IFECO IoT
+        </div>
+        <nav className="nav-menu">
+          <div className="nav-item active"><Menu size={20} /> Dashboard</div>
+          <div className="nav-item"><Activity size={20} /> Histórico</div>
+          
+          <button className="nav-item logout-btn" onClick={logout}>
+            <LogOut size={20} /> Sair do Sistema
+          </button>
+        </nav>
+      </aside>
 
-      <div className="painel-controle">
-        {/* Bloco do Motor */}
-        <div className="controle-box">
-           <h3>Controle de Carga</h3>
-           <button 
-              className={`btn-toggle ${motorLigado ? 'btn-desligar' : 'btn-ligar'}`}
-              onClick={alternarMotor}
-           >
-              {motorLigado ? 'DESLIGAR MOTOR' : 'LIGAR MOTOR'}
-           </button>
-        </div>
-
-        {/* Bloco da Gravação */}
-        <div className="controle-box">
-           <h3>Registro de Dados</h3>
-           {gravando && <span className="rec-blink">● GRAVANDO...</span>}
-           <button 
-              className={`btn-toggle ${gravando ? 'btn-exportar' : 'btn-iniciar-rec'}`}
-              onClick={gerenciarGravacao}
-           >
-              {gravando ? 'PARAR E BAIXAR JSON' : 'INICIAR SESSÃO'}
-           </button>
-        </div>
-      </div>
-      
-      <div className="grid">
-        <div className="card">
-          <h3>Velocidade (km/h)</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-              <YAxis domain={[0, 150]} stroke="#aaa" />
-              <Tooltip contentStyle={{backgroundColor: '#333', border: 'none'}} />
-              <Line type="monotone" dataKey="velocidade" stroke="#00ff88" strokeWidth={3} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+      {/* ÁREA PRINCIPAL */}
+      <main className="main-content">
         
-        <div className="card">
-            <h3>Tensão (V)</h3>
-            <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <YAxis domain={[0, 30]} stroke="#aaa" />
-                <Tooltip contentStyle={{backgroundColor: '#333', border: 'none'}} />
-                <Line type="monotone" dataKey="tensao" stroke="#e94560" strokeWidth={3} dot={false} />
-            </LineChart>
-            </ResponsiveContainer>
-        </div>
+        {/* Header Superior */}
+        <header className="top-header">
+          <div className="page-title">
+            <h1>Monitoramento em Tempo Real</h1>
+            <span>Visão geral dos sensores do ESP32</span>
+          </div>
+          
+          <div className="header-actions">
+            <div className="status-badge">
+              <div className={`dot ${gravando ? 'rec' : 'online'}`} />
+              {gravando ? 'GRAVANDO SESSÃO' : 'SISTEMA ONLINE'}
+            </div>
+            
+            <button className={`btn ${gravando ? 'btn-rec recording' : 'btn-rec'}`} onClick={gerenciarGravacao}>
+              {gravando ? <Square size={18}/> : <Download size={18}/>}
+              {gravando ? 'Parar Gravação' : 'Gravar Sessão'}
+            </button>
 
-        <div className="card">
-            <h3>Corrente (A)</h3>
-            <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <YAxis domain={[0, 15]} stroke="#aaa" />
-                <Tooltip contentStyle={{backgroundColor: '#333', border: 'none'}} />
-                <Line type="monotone" dataKey="corrente" stroke="#fce38a" strokeWidth={3} dot={false} />
-            </LineChart>
-            </ResponsiveContainer>
-        </div>
+            <button className={`btn ${motorLigado ? 'btn-danger' : 'btn-primary'}`} onClick={alternarMotor}>
+              <Play size={18} fill={motorLigado ? "currentColor" : "none"} />
+              {motorLigado ? 'Parar Motor' : 'Ligar Motor'}
+            </button>
+          </div>
+        </header>
 
-        <div className="card">
-            <h3>Temperatura (°C)</h3>
+        {/* Grid de Gráficos */}
+        <div className="grid-container">
+          
+          {/* Card Velocidade */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title"><Gauge size={20} /> Velocidade</div>
+              <div className="card-value">{ultimoDado.velocidade.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>km/h</span></div>
+            </div>
             <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <YAxis domain={[0, 100]} stroke="#aaa" />
-                <Tooltip contentStyle={{backgroundColor: '#333', border: 'none'}} />
-                <Line type="monotone" dataKey="temperatura" stroke="#00d4ff" strokeWidth={3} dot={false} />
-            </LineChart>
+              <AreaChart data={data}>
+                <defs>
+                  <linearGradient id="colorVel" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#1e9e53" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#1e9e53" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                <Tooltip />
+                <Area type="monotone" dataKey="velocidade" stroke="#1e9e53" fillOpacity={1} fill="url(#colorVel)" strokeWidth={2} />
+              </AreaChart>
             </ResponsiveContainer>
+          </div>
+
+          {/* Card Tensão */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title"><Zap size={20} /> Tensão da Bateria</div>
+              <div className="card-value">{ultimoDado.tensao.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>Volts</span></div>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                <Tooltip />
+                <Line type="monotone" dataKey="tensao" stroke="#f59e0b" strokeWidth={3} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Card Corrente */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title"><Activity size={20} /> Corrente</div>
+              <div className="card-value">{ultimoDado.corrente.toFixed(2)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>Amperes</span></div>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                <Tooltip />
+                <Line type="monotone" dataKey="corrente" stroke="#ef4444" strokeWidth={3} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Card Temperatura */}
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title"><Thermometer size={20} /> Temperatura</div>
+              <div className="card-value">{ultimoDado.temperatura.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>°C</span></div>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={data}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                <Tooltip />
+                <Line type="monotone" dataKey="temperatura" stroke="#3b82f6" strokeWidth={3} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
         </div>
-      </div>
+      </main>
     </div>
   );
 }
