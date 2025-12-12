@@ -1,100 +1,122 @@
+require('dotenv').config(); // Carrega as variaveis do .env
 const express = require('express');
-const mysql = require('mysql2');
+const { Sequelize, DataTypes } = require('sequelize');
 const mqtt = require('mqtt');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const authMiddleware = require('./middleware/auth'); // Nosso porteiro
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-
-const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: '',
-    database: 'iot_projeto'
+// --- 1. CONEXÃO SEQUELIZE (Novo jeito robusto) ---
+const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, {
+    host: process.env.DB_HOST,
+    dialect: 'mysql',
+    logging: false // Desliga logs chatos no terminal
 });
 
-db.connect(err => {
-    if (err) {
-        console.error('Erro ao conectar ao MySQL:', err);
-        return;
-    }
-    console.log('MySQL Conectado!');
-});
+// Importar Modelos
+const User = require('./models/User')(sequelize);
 
-// --- 2. CONFIGURAÇÃO DO MQTT ---
+// Definindo modelo de Leituras (antigo) via Sequelize agora
+const Leitura = sequelize.define('Leitura', {
+    velocidade: DataTypes.FLOAT,
+    tensao: DataTypes.FLOAT,
+    corrente: DataTypes.FLOAT,
+    temperatura: DataTypes.FLOAT,
+    data_hora: { type: DataTypes.DATE, defaultValue: Sequelize.NOW }
+}, { timestamps: false, tableName: 'leituras' });
+
+// Sincroniza o banco (Cria a tabela Users se não existir)
+sequelize.sync().then(() => console.log('Banco de Dados Sincronizado!'));
+
+// --- 2. MQTT (Mantivemos a lógica) ---
 const mqttClient = mqtt.connect('mqtt://test.mosquitto.org');
 const TOPICO_TELEMETRIA = 'esp32/painel/telemetria';
 const TOPICO_COMANDO = 'esp32/painel/comando';
 
-mqttClient.on('connect', () => {
-    console.log('Conectado ao Broker MQTT');
-    mqttClient.subscribe(TOPICO_TELEMETRIA);
-});
+mqttClient.on('connect', () => mqttClient.subscribe(TOPICO_TELEMETRIA));
 
-mqttClient.on('message', (topic, message) => {
+mqttClient.on('message', async (topic, message) => {
     if (topic === TOPICO_TELEMETRIA) {
         try {
             const dados = JSON.parse(message.toString());
-            
-            // Salva no banco
-            const sql = "INSERT INTO leituras (velocidade, tensao, corrente, temperatura) VALUES (?, ?, ?, ?)";
-            const valores = [dados.velocidade, dados.tensao, dados.corrente, dados.temperatura];
-
-            db.query(sql, valores, (err) => {
-                if (err) console.error('Erro no INSERT:', err);
-            });
+            // Salva usando Sequelize (Mais limpo!)
+            await Leitura.create(dados);
         } catch (e) {
-            console.error('Erro ao processar JSON:', e);
+            console.error('Erro MQTT:', e);
         }
     }
 });
 
-// --- 3. ROTAS DA API (O que o Celular acessa) ---
+// --- 3. ROTAS DE AUTENTICAÇÃO (Públicas) ---
 
-// ROTA 1: Dados para os gráficos (Últimos 20 registros)
-app.get('/api/telemetria', (req, res) => {
-    const sql = "SELECT * FROM (SELECT * FROM leituras ORDER BY id DESC LIMIT 20) sub ORDER BY id ASC";
-    db.query(sql, (err, results) => {
-        if (err) return res.status(500).json(err);
-        res.json(results);
-    });
-});
-
-// ROTA 2: Enviar comando para o ESP32 (Ligar/Desligar)
-app.post('/api/comando', (req, res) => {
-    const { acao } = req.body; // Recebe "LIGAR" ou "DESLIGAR"
-    
-    if (acao === 'LIGAR' || acao === 'DESLIGAR') {
-        console.log(`Enviando comando: ${acao}`);
-        mqttClient.publish(TOPICO_COMANDO, acao);
-        res.json({ status: 'Comando enviado', acao });
-    } else {
-        res.status(400).json({ error: 'Comando inválido' });
+// Registro de Usuário
+app.post('/auth/register', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        // Criptografa a senha antes de salvar
+        const hashPassword = await bcrypt.hash(password, 10);
+        const user = await User.create({ email, password: hashPassword });
+        res.json({ message: "Usuário criado!", id: user.id });
+    } catch (err) {
+        res.status(400).json({ error: "Erro ao criar usuário (Email já existe?)" });
     }
 });
 
-// ROTA 3: Exportar dados de uma Sessão (Filtro por Data/Hora)
-app.get('/api/exportar', (req, res) => {
-    const { inicio, fim } = req.query; // Recebe data de inicio e fim do Frontend
-    
-    if (!inicio || !fim) {
-        return res.status(400).json({ error: 'Precisa enviar inicio e fim' });
+// Login
+app.post('/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const user = await User.findOne({ where: { email } });
+        if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+        // Compara a senha enviada com a criptografada no banco
+        const isValid = await bcrypt.compare(password, user.password);
+        if (!isValid) return res.status(401).json({ error: "Senha incorreta" });
+
+        // Gera o Token JWT
+        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+        
+        res.json({ token, email: user.email });
+    } catch (err) {
+        res.status(500).json({ error: "Erro no login" });
     }
+});
 
-    console.log(`Exportando sessão: de ${inicio} até ${fim}`);
 
-    // Busca no banco tudo que aconteceu entre o clique de Iniciar e Parar
-    const sql = "SELECT * FROM leituras WHERE data_hora >= ? AND data_hora <= ?";
-    
-    db.query(sql, [inicio, fim], (err, results) => {
-        if (err) return res.status(500).json(err);
-        res.json(results);
+
+
+app.get('/api/telemetria', authMiddleware, async (req, res) => {
+    const leituras = await Leitura.findAll({ 
+        order: [['id', 'DESC']], 
+        limit: 20 
     });
+    
+    res.json(leituras.reverse());
 });
 
-// Inicia o servidor na porta 3001
-app.listen(3001, () => {
-    console.log('Servidor Backend rodando na porta 3001');
+app.post('/api/comando', authMiddleware, (req, res) => {
+    const { acao } = req.body;
+    mqttClient.publish(TOPICO_COMANDO, acao);
+    res.json({ status: 'Comando enviado por usuário autenticado' });
 });
+
+app.get('/api/exportar', authMiddleware, async (req, res) => {
+    const { inicio, fim } = req.query;
+    const { Op } = require('sequelize'); 
+    
+    const dados = await Leitura.findAll({
+        where: {
+            data_hora: {
+                [Op.between]: [inicio, fim]
+            }
+        }
+    });
+    res.json(dados);
+});
+
+app.listen(3001, () => console.log('Servidor Seguro rodando na porta 3001'));
