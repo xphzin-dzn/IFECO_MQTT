@@ -1,13 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { 
-  LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
-} from 'recharts';
-import { 
-  Zap, Activity, Thermometer, Gauge, LogOut, Play, Square, Download, Menu, Wifi 
-} from 'lucide-react';
+import { LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { Zap, Activity, Thermometer, Gauge, LogOut, Play, Square, Save, Menu } from 'lucide-react';
 import './App.css';
 import Login from './Login';
+import History from './History'; // <--- Importar a nova tela
 
 const API_URL = 'http://localhost:3001'; 
 
@@ -21,6 +18,11 @@ interface DadosSensor {
 
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('userToken'));
+  
+  // --- NAVEGAÇÃO ---
+  const [currentScreen, setCurrentScreen] = useState<'dashboard' | 'history'>('dashboard');
+
+  // --- ESTADOS DO DASHBOARD ---
   const [data, setData] = useState<DadosSensor[]>([]);
   const [motorLigado, setMotorLigado] = useState(false);
   const [gravando, setGravando] = useState(false);
@@ -60,46 +62,59 @@ function App() {
     } catch (error) { alert('Erro ao enviar comando!'); }
   };
 
+  // --- NOVA LÓGICA DE GRAVAÇÃO (Salva no Backend) ---
   const gerenciarGravacao = async () => {
     if (!gravando) {
+      // INICIAR
       setHoraInicio(pegarHoraLocal());
       setGravando(true);
     } else {
+      // PARAR E SALVAR
       const horaFim = pegarHoraLocal();
       setGravando(false);
+      
+      const nomeSessao = prompt("Nome da Sessão (Opcional):", `Sessão ${new Date().toLocaleTimeString()}`);
+      
       try {
-        const response = await axios.get(`${API_URL}/api/exportar`, { params: { inicio: horaInicio, fim: horaFim } });
-        if (!response.data.length) return alert("Nenhum dado capturado.");
-        
-        const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: "application/json" });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `sessao_${horaFim.replace(/:/g, '-')}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } catch (error) { alert("Erro ao exportar."); }
+        await axios.post(`${API_URL}/api/sessions`, {
+            nome: nomeSessao,
+            inicio: horaInicio,
+            fim: horaFim
+        });
+        alert("Sessão salva com sucesso! Consulte no Histórico.");
+      } catch (error) {
+        alert("Erro ao salvar sessão no histórico.");
+      }
     }
   };
 
   if (!token) return <Login setToken={(t) => { setToken(t); localStorage.setItem('userToken', t); }} />;
 
-  // Pega o último dado para mostrar o valor atual
   const ultimoDado = data.length > 0 ? data[data.length - 1] : { velocidade: 0, tensao: 0, corrente: 0, temperatura: 0 };
 
   return (
     <div className="app-layout">
-      {/* SIDEBAR LATERAL */}
+      {/* SIDEBAR */}
       <aside className="sidebar">
         <div className="brand">
           <Zap size={28} /> IFECO IoT
         </div>
         <nav className="nav-menu">
-          <div className="nav-item active"><Menu size={20} /> Dashboard</div>
-          <div className="nav-item"><Activity size={20} /> Histórico</div>
+          <div 
+            className={`nav-item ${currentScreen === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setCurrentScreen('dashboard')}
+          >
+            <Menu size={20} /> Dashboard
+          </div>
+          <div 
+            className={`nav-item ${currentScreen === 'history' ? 'active' : ''}`}
+            onClick={() => setCurrentScreen('history')}
+          >
+            <Activity size={20} /> Histórico
+          </div>
           
           <button className="nav-item logout-btn" onClick={logout}>
-            <LogOut size={20} /> Sair do Sistema
+            <LogOut size={20} /> Sair
           </button>
         </nav>
       </aside>
@@ -107,101 +122,101 @@ function App() {
       {/* ÁREA PRINCIPAL */}
       <main className="main-content">
         
-        {/* Header Superior */}
-        <header className="top-header">
-          <div className="page-title">
-            <h1>Monitoramento em Tempo Real</h1>
-            <span>Visão geral dos sensores do ESP32</span>
-          </div>
-          
-          <div className="header-actions">
-            <div className="status-badge">
-              <div className={`dot ${gravando ? 'rec' : 'online'}`} />
-              {gravando ? 'GRAVANDO SESSÃO' : 'SISTEMA ONLINE'}
-            </div>
-            
-            <button className={`btn ${gravando ? 'btn-rec recording' : 'btn-rec'}`} onClick={gerenciarGravacao}>
-              {gravando ? <Square size={18}/> : <Download size={18}/>}
-              {gravando ? 'Parar Gravação' : 'Gravar Sessão'}
-            </button>
+        {/* Renderiza a tela escolhida */}
+        {currentScreen === 'history' ? (
+            <History />
+        ) : (
+            <>
+                {/* CONTEÚDO DO DASHBOARD */}
+                <header className="top-header">
+                  <div className="page-title">
+                    <h1>Monitoramento em Tempo Real</h1>
+                    <span>Visão geral dos sensores do ESP32</span>
+                  </div>
+                  
+                  <div className="header-actions">
+                    <div className="status-badge">
+                      <div className={`dot ${gravando ? 'rec' : 'online'}`} />
+                      {gravando ? 'GRAVANDO' : 'ONLINE'}
+                    </div>
+                    
+                    <button className={`btn ${gravando ? 'btn-rec recording' : 'btn-rec'}`} onClick={gerenciarGravacao}>
+                      {gravando ? <Square size={18}/> : <Save size={18}/>}
+                      {gravando ? 'Parar e Salvar' : 'Gravar Sessão'}
+                    </button>
 
-            <button className={`btn ${motorLigado ? 'btn-danger' : 'btn-primary'}`} onClick={alternarMotor}>
-              <Play size={18} fill={motorLigado ? "currentColor" : "none"} />
-              {motorLigado ? 'Parar Motor' : 'Ligar Motor'}
-            </button>
-          </div>
-        </header>
+                    <button className={`btn ${motorLigado ? 'btn-danger' : 'btn-primary'}`} onClick={alternarMotor}>
+                      <Play size={18} fill={motorLigado ? "currentColor" : "none"} />
+                      {motorLigado ? 'Parar Motor' : 'Ligar Motor'}
+                    </button>
+                  </div>
+                </header>
 
-        {/* Grid de Gráficos */}
-        <div className="grid-container">
-          
-          {/* Card Velocidade */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title"><Gauge size={20} /> Velocidade</div>
-              <div className="card-value">{ultimoDado.velocidade.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>km/h</span></div>
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={data}>
-                <defs>
-                  <linearGradient id="colorVel" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1e9e53" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#1e9e53" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <Tooltip />
-                <Area type="monotone" dataKey="velocidade" stroke="#1e9e53" fillOpacity={1} fill="url(#colorVel)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+                <div className="grid-container">
+                  <div className="card">
+                    <div className="card-header">
+                      <div className="card-title"><Gauge size={20} /> Velocidade</div>
+                      <div className="card-value">{ultimoDado.velocidade.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>km/h</span></div>
+                    </div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <AreaChart data={data}>
+                        <defs>
+                          <linearGradient id="colorVel" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#1e9e53" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#1e9e53" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="velocidade" stroke="#1e9e53" fillOpacity={1} fill="url(#colorVel)" strokeWidth={2} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
 
-          {/* Card Tensão */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title"><Zap size={20} /> Tensão da Bateria</div>
-              <div className="card-value">{ultimoDado.tensao.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>Volts</span></div>
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <Tooltip />
-                <Line type="monotone" dataKey="tensao" stroke="#f59e0b" strokeWidth={3} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+                  <div className="card">
+                    <div className="card-header">
+                      <div className="card-title"><Zap size={20} /> Tensão</div>
+                      <div className="card-value">{ultimoDado.tensao.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>V</span></div>
+                    </div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="tensao" stroke="#f59e0b" strokeWidth={3} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
 
-          {/* Card Corrente */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title"><Activity size={20} /> Corrente</div>
-              <div className="card-value">{ultimoDado.corrente.toFixed(2)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>Amperes</span></div>
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <Tooltip />
-                <Line type="monotone" dataKey="corrente" stroke="#ef4444" strokeWidth={3} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+                  <div className="card">
+                    <div className="card-header">
+                      <div className="card-title"><Activity size={20} /> Corrente</div>
+                      <div className="card-value">{ultimoDado.corrente.toFixed(2)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>A</span></div>
+                    </div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="corrente" stroke="#ef4444" strokeWidth={3} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
 
-          {/* Card Temperatura */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title"><Thermometer size={20} /> Temperatura</div>
-              <div className="card-value">{ultimoDado.temperatura.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>°C</span></div>
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <Tooltip />
-                <Line type="monotone" dataKey="temperatura" stroke="#3b82f6" strokeWidth={3} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-
-        </div>
+                  <div className="card">
+                    <div className="card-header">
+                      <div className="card-title"><Thermometer size={20} /> Temperatura</div>
+                      <div className="card-value">{ultimoDado.temperatura.toFixed(1)} <span style={{fontSize:'0.8rem', color:'#aaa'}}>°C</span></div>
+                    </div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={data}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="temperatura" stroke="#3b82f6" strokeWidth={3} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+            </>
+        )}
       </main>
     </div>
   );
