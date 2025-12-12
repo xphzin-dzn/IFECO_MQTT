@@ -1,38 +1,54 @@
-.App {
-  text-align: center;
+/* ... (Mantenha o resto igual) ... */
+
+.painel-controle {
+  /* Mudamos para flex-wrap para caber os dois blocos no celular */
+  flex-wrap: wrap; 
+  gap: 20px;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+.controle-box {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  flex: 1; /* Ocupa espaço igual */
+}
+
+.controle-box h3 {
+  color: #a0a0a0;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+/* Botões de Gravação */
+.btn-iniciar-rec {
+  background: #3a86ff;
   color: white;
+  box-shadow: 0 0 10px #3a86ff;
 }
 
-.App-link {
-  color: #61dafb;
+.btn-exportar {
+  background: #ffbe0b;
+  color: #000;
+  box-shadow: 0 0 10px #ffbe0b;
+  animation: pulse 2s infinite;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* Luzinha de REC piscando */
+.rec-blink {
+  color: #ff4d4d;
+  font-weight: bold;
+  margin-bottom: 5px;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
 }
