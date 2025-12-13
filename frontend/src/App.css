@@ -1,14 +1,35 @@
 :root {
-  --primary: #1e9e53; /* O Verde do seu projeto antigo */
+  /* --- CORES PADRÃO (LIGHT MODE) --- */
+  --primary: #1e9e53;
   --primary-hover: #168042;
-  --bg-main: #F8FAFC; /* Fundo cinza bem clarinho */
-  --bg-card: #FFFFFF;
-  --text-main: #111827;
+  --bg-main: #F8FAFC; /* Fundo claro */
+  --bg-card: #FFFFFF; /* Card branco */
+  --text-main: #111827; /* Texto escuro */
   --text-secondary: #6B7280;
   --border: #E2E8F0;
   --danger: #ef4444;
   --warning: #f59e0b;
   --success: #10b981;
+  
+  /* Cores específicas da Sidebar */
+  --sidebar-bg: #1e9e53;
+  --sidebar-text: #ffffff;
+}
+
+/* --- CORES DARK MODE --- */
+[data-theme='dark'] {
+  --primary: #1e9e53;
+  --primary-hover: #22c55e;
+  --bg-main: #0f172a; /* Azul noite profundo */
+  --bg-card: #1e293b; /* Azul acinzentado */
+  --text-main: #f1f5f9; /* Branco gelo */
+  --text-secondary: #94a3b8;
+  --border: #334155;
+  --danger: #f87171;
+  
+  /* Sidebar fica escura no modo noturno */
+  --sidebar-bg: #111827;
+  --sidebar-text: #e2e8f0;
 }
 
 body {
@@ -16,25 +37,32 @@ body {
   background-color: var(--bg-main);
   color: var(--text-main);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  overflow: hidden; /* Evita scroll na página inteira */
+  overflow: hidden;
+  /* Animação suave ao trocar de tema */
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
-/* --- LAYOUT PRINCIPAL (SIDEBAR + CONTEÚDO) --- */
+/* --- 1. LAYOUT PRINCIPAL --- */
 .app-layout {
   display: flex;
   height: 100vh;
+  height: 100dvh; /* Fix para mobile */
   width: 100vw;
+  background-color: var(--bg-main);
 }
 
-/* Sidebar Verde */
+/* Sidebar */
 .sidebar {
   width: 260px;
-  background-color: var(--primary);
-  color: white;
+  background-color: var(--sidebar-bg); /* Usa variável */
+  color: var(--sidebar-text); /* Usa variável */
   display: flex;
   flex-direction: column;
   padding: 24px;
   box-shadow: 4px 0 10px rgba(0,0,0,0.05);
+  z-index: 10;
+  transition: all 0.3s ease; /* Transição suave */
+  flex-shrink: 0;
 }
 
 .brand {
@@ -44,6 +72,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .nav-menu {
@@ -51,6 +80,7 @@ body {
   flex-direction: column;
   gap: 8px;
   flex: 1;
+  overflow-y: auto;
 }
 
 .nav-item {
@@ -62,30 +92,35 @@ body {
   cursor: pointer;
   font-weight: 500;
   transition: all 0.2s;
-  color: rgba(255,255,255,0.8);
+  color: rgba(255,255,255,0.7); /* Transparência funciona bem em ambos */
+  flex-shrink: 0;
 }
 
 .nav-item:hover, .nav-item.active {
   background-color: rgba(255,255,255,0.15);
-  color: white;
+  color: var(--sidebar-text);
 }
 
 .logout-btn {
   margin-top: auto;
   background: rgba(0,0,0,0.2);
+  flex-shrink: 0;
+  margin-bottom: env(safe-area-inset-bottom);
+  color: var(--sidebar-text);
 }
 
 /* Área Principal */
 .main-content {
   flex: 1;
-  overflow-y: auto; /* Scroll só aqui dentro */
+  overflow-y: auto;
   padding: 32px;
   display: flex;
   flex-direction: column;
   gap: 24px;
+  position: relative;
 }
 
-/* Header Superior */
+/* Header */
 .top-header {
   display: flex;
   justify-content: space-between;
@@ -111,6 +146,8 @@ body {
   align-items: center;
 }
 
+/* --- 2. COMPONENTES VISUAIS --- */
+
 /* Status Badge */
 .status-badge {
   display: flex;
@@ -120,15 +157,12 @@ body {
   border-radius: 20px;
   font-size: 0.85rem;
   font-weight: 600;
-  background: white;
+  background: var(--bg-card); /* Adaptável */
   border: 1px solid var(--border);
+  color: var(--text-main);
 }
 
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
+.dot { width: 8px; height: 8px; border-radius: 50%; }
 .dot.online { background-color: var(--success); box-shadow: 0 0 8px var(--success); }
 .dot.offline { background-color: var(--danger); }
 .dot.rec { background-color: var(--danger); animation: pulse 1.5s infinite; }
@@ -136,22 +170,22 @@ body {
 /* Cards */
 .grid-container {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
   gap: 24px;
 }
 
 .card {
-  background: var(--bg-card);
+  background: var(--bg-card); /* Adaptável */
   border-radius: 16px;
   padding: 24px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  border: 1px solid var(--border);
-  transition: transform 0.2s;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border); /* Adaptável */
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
 .card-header {
@@ -180,6 +214,7 @@ body {
 .btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 10px 20px;
   border-radius: 8px;
@@ -192,29 +227,29 @@ body {
 .btn-primary { background: var(--primary); color: white; }
 .btn-primary:hover { background: var(--primary-hover); }
 
-.btn-danger { background: #fee2e2; color: var(--danger); }
-.btn-danger:hover { background: #fecaca; }
+.btn-danger { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+.btn-danger:hover { background: rgba(239, 68, 68, 0.2); }
 
-.btn-outline { background: white; border: 1px solid var(--border); color: var(--text-main); }
-.btn-outline:hover { background: #f9fafb; }
+.btn-outline { background: var(--bg-card); border: 1px solid var(--border); color: var(--text-main); }
+.btn-outline:hover { background: var(--bg-main); }
 
-.btn-rec { background: var(--text-main); color: white; }
+.btn-rec { background: var(--text-main); color: var(--bg-card); }
 .btn-rec.recording { background: var(--danger); color: white; }
 
-/* Animações */
 @keyframes pulse {
   0% { opacity: 1; }
   50% { opacity: 0.5; }
   100% { opacity: 1; }
 }
 
-/* Login Screen Styles */
+/* --- 3. LOGIN RESPONSIVO & DARK MODE --- */
 .login-container {
   display: flex;
   height: 100vh;
   width: 100vw;
-  background: white;
+  background: var(--bg-main); /* Adaptável */
 }
+
 .login-left {
   flex: 1;
   background: var(--primary);
@@ -223,20 +258,28 @@ body {
   justify-content: center;
   color: white;
   flex-direction: column;
+  padding: 20px;
+  text-align: center;
 }
+
 .login-right {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px;
+  background: var(--bg-card); /* Adaptável (Fica escuro no dark mode) */
 }
+
 .login-form-box {
   width: 100%;
   max-width: 400px;
+  color: var(--text-main);
 }
+
 .input-group { margin-bottom: 16px; }
 .input-group label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-main); }
+
 .input-field {
   width: 100%;
   padding: 12px;
@@ -244,6 +287,72 @@ body {
   border-radius: 8px;
   font-size: 1rem;
   outline: none;
-  box-sizing: border-box; /* Importante para não quebrar o layout */
+  box-sizing: border-box;
+  background: var(--bg-main); /* Input escuro no dark mode */
+  color: var(--text-main);
 }
+
 .input-field:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(30, 158, 83, 0.1); }
+
+/* --- 4. ELEMENTOS MOBILE (Escondidos no PC) --- */
+.sidebar-close-btn { display: none; background: none; border: none; color: white; cursor: pointer; margin-left: auto; }
+.mobile-menu-btn { display: none; background: none; border: none; color: var(--text-main); cursor: pointer; padding: 8px; margin-right: 10px; }
+
+/* Overlay Escuro */
+.sidebar-overlay { 
+  display: none; 
+  position: fixed; 
+  top: 0; 
+  left: 0; 
+  width: 100vw; 
+  height: 100vh; 
+  height: 100dvh;
+  background: rgba(0, 0, 0, 0.6); 
+  z-index: 998; 
+  opacity: 0; 
+  transition: opacity 0.3s; 
+  backdrop-filter: blur(2px); 
+}
+.sidebar-overlay.visible { display: block; opacity: 1; }
+
+/* --- 5. RESPONSIVIDADE (MEDIA QUERIES) --- */
+@media (max-width: 768px) {
+  .mobile-menu-btn { display: block; }
+  .sidebar-close-btn { display: block; }
+
+  /* Sidebar flutuante no Mobile */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: -280px;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 1000;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 280px;
+    transform: translateX(0);
+    box-shadow: none;
+  }
+  
+  .sidebar.open {
+    transform: translateX(280px);
+    box-shadow: 5px 0 25px rgba(0,0,0,0.5);
+  }
+
+  /* Ajuste do conteúdo principal */
+  .main-content {
+    padding: 16px;
+    width: 100%;
+  }
+
+  .grid-container { grid-template-columns: 1fr; }
+
+  .top-header { flex-wrap: wrap; gap: 10px; }
+  .page-title h1 { font-size: 1.4rem; }
+  .header-actions { width: 100%; justify-content: space-between; margin-top: 10px; }
+
+  /* Login Responsivo */
+  .login-container { flex-direction: column; }
+  .login-left { flex: 0 0 30%; padding: 20px; }
+  .login-right { flex: 1; padding: 20px; align-items: flex-start; }
+}
