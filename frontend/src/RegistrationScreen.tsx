@@ -3,10 +3,10 @@ import axios from 'axios';
 import { UserPlus, User, Mail, Lock, Zap } from 'lucide-react';
 import './App.css';
 
-const API_URL = 'http://192.168.0.15:3001'; // CONFIRA SEU IP
+const API_URL = 'http://192.168.0.15:3001'; // SEU IP
 
 interface RegistrationProps {
-    onSwitchToLogin: () => void; // Função para voltar pro login
+    onSwitchToLogin: () => void;
 }
 
 const RegistrationScreen: React.FC<RegistrationProps> = ({ onSwitchToLogin }) => {
@@ -18,17 +18,34 @@ const RegistrationScreen: React.FC<RegistrationProps> = ({ onSwitchToLogin }) =>
     const handleRegister = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        if (!name || !email || !password) {
-            alert("Preencha todos os campos!");
+        // --- 1. APLICANDO O TRIM (LIMPEZA) ---
+        const cleanName = name.trim();
+        const cleanEmail = email.trim();
+
+        // --- 2. VALIDAÇÃO USANDO OS DADOS LIMPOS ---
+        // Isso impede que alguém cadastre um nome feito só de espaços "   "
+        if (!cleanName || !cleanEmail || !password) {
+            alert("Preencha todos os campos! (Espaços em branco não contam)");
+            return;
+        }
+
+        // Opcional: Validação de tamanho mínimo
+        if (cleanName.length < 2) {
+            alert("Por favor, insira um nome válido.");
             return;
         }
 
         setLoading(true);
         try {
-            // Envia nome, email e senha para o backend
-            await axios.post(`${API_URL}/auth/register`, { name, email, password });
+            // --- 3. ENVIA OS DADOS LIMPOS ---
+            await axios.post(`${API_URL}/auth/register`, { 
+                name: cleanName, 
+                email: cleanEmail, 
+                password 
+            });
+            
             alert("Conta criada com sucesso! Faça login.");
-            onSwitchToLogin(); // Volta para a tela de login automaticamente
+            onSwitchToLogin(); 
         } catch (error) {
             alert("Erro ao criar conta. Tente outro e-mail.");
         } finally {
