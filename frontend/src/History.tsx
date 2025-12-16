@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer, XAxis, YAxis } from 'recharts';
-import { Calendar, Clock, Activity, Download, MousePointerClick, AlertCircle } from 'lucide-react';
+import { Calendar, Clock, Activity, FileJson, FileSpreadsheet, MousePointerClick, AlertCircle } from 'lucide-react';
 import './App.css';
 
-// SEU IP CONFIGURADO
-const API_URL = 'http://172.29.110.52:3001';
+const API_URL = 'http://192.168.0.21:3001';
 
 interface Session {
     id: number;
@@ -58,6 +57,7 @@ const History: React.FC = () => {
         }
     };
 
+    // --- EXPORTAR JSON ---
     const exportarJSON = () => {
         if (!chartData.length) return;
         const jsonString = JSON.stringify(chartData, null, 2);
@@ -65,7 +65,41 @@ const History: React.FC = () => {
         const href = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = href;
-        link.download = `export_sessao_${selectedSession?.id}.json`;
+        link.download = `sessao_${selectedSession?.id}_${selectedSession?.nome}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    // --- EXPORTAR CSV (NOVO) ---
+    const exportarCSV = () => {
+        if (!chartData.length) return;
+
+        // 1. Pega os cabeçalhos
+        const headers = Object.keys(chartData[0]);
+
+        // 2. Monta as linhas
+        const csvRows = [
+            headers.join(','), // Cabeçalho
+            ...chartData.map(row => {
+                return headers.map(fieldName => {
+                    // @ts-ignore (acesso dinâmico seguro aqui pois sabemos as chaves)
+                    const val = row[fieldName];
+                    // Escapa aspas para evitar quebra no Excel
+                    return `"${String(val).replace(/"/g, '""')}"`;
+                }).join(',');
+            })
+        ];
+
+        // 3. Cria o arquivo (com BOM \uFEFF para acentos funcionarem no Excel)
+        const csvString = csvRows.join('\n');
+        const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+        
+        // 4. Download
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `sessao_${selectedSession?.id}_${selectedSession?.nome}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -126,9 +160,18 @@ const History: React.FC = () => {
                             <div className="card-title">
                                 <Activity size={20} /> Análise: {selectedSession.nome}
                             </div>
-                            <button className="btn btn-outline" onClick={exportarJSON}>
-                                <Download size={16} /> Baixar JSON
-                            </button>
+                            
+                            {/* --- BOTÕES DE EXPORTAÇÃO --- */}
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <button className="btn btn-outline" onClick={exportarJSON} title="Exportar JSON Técnico">
+                                    <FileJson size={16} /> JSON
+                                </button>
+                                <button className="btn btn-primary" onClick={exportarCSV} title="Exportar para Excel">
+                                    <FileSpreadsheet size={16} /> Excel / CSV
+                                </button>
+                            </div>
+                            {/* --------------------------- */}
+
                         </div>
 
                         {loading ? (

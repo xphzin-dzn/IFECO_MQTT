@@ -3,7 +3,7 @@ import axios from 'axios';
 import { Lock, Shield, LogOut, Save, AlertCircle, CheckCircle, Moon, Sun, Camera } from 'lucide-react';
 import './App.css';
 
-const API_URL = 'http://172.29.110.52:3001';
+const API_URL = 'http://192.168.0.21:3001';
 
 interface SettingsProps {
     logout: () => void;

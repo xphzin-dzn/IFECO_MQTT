@@ -3,7 +3,7 @@ import axios from 'axios';
 import { UserPlus, User, Mail, Lock, Zap } from 'lucide-react';
 import './App.css';
 
-const API_URL = 'http://172.29.110.52:3001'; // SEU IP
+const API_URL = 'http://192.168.0.21:3001'; // SEU IP
 
 interface RegistrationProps {
     onSwitchToLogin: () => void;

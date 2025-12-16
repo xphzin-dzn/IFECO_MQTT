@@ -4,7 +4,7 @@ import { LogIn, Mail, Lock } from 'lucide-react';
 import './App.css';
 import RegistrationScreen from './RegistrationScreen';
 
-const API_URL = 'http://172.29.110.52:3001';
+const API_URL = 'http://192.168.0.21:3001';
 
 interface LoginProps {
     // Nova assinatura (Recebe token, nome E avatar)

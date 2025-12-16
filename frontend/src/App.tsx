@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, YAxis } from 'recharts';
 import {
   Zap, Activity, Thermometer, Gauge, LogOut, Play, Square, Save, Menu, Settings as SettingsIcon,
-  Calculator, Timer, TrendingUp, X, Sun, Moon, AlertTriangle, Flame
+  Calculator, Timer, TrendingUp, X, AlertTriangle, Flame
 } from 'lucide-react';
 import './App.css';
 import Login from './Login';
@@ -12,7 +12,7 @@ import Settings from './Settings';
 
 // IP CONFIG
 // Lembre-se: Se mudar de rede, atualize este IP aqui também!
-const API_URL = 'http://172.29.110.52:3001';
+const API_URL = 'http://192.168.0.21:3001';
 
 // Tipos
 interface DadosSensor {
@@ -21,6 +21,7 @@ interface DadosSensor {
   tensao: number;
   corrente: number;
   temperatura: number;
+  data_hora?: string;
 }
 
 interface MetricasCalculadas {
@@ -77,7 +78,8 @@ function App() {
   const [data, setData] = useState<DadosSensor[]>([]);
   const [motorLigado, setMotorLigado] = useState(false);
   const [gravando, setGravando] = useState(false);
-  const [horaInicio, setHoraInicio] = useState<string | null>(null);
+  
+  // Referência para calcular integrais (energia/distância) no frontend
   const lastUpdateRef = useRef<number>(Date.now());
   const [metricas, setMetricas] = useState<MetricasCalculadas>({
     distanciaTotal: 0,
@@ -89,38 +91,42 @@ function App() {
 
   if (token) axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-  const pegarHoraLocal = () => {
-    const agora = new Date();
-    const offset = agora.getTimezoneOffset() * 60000;
-    return new Date(agora.getTime() - offset).toISOString().slice(0, 19).replace('T', ' ');
-  };
-
+  // --- FETCH DE DADOS "AO VIVO" (Super Rápido) ---
   useEffect(() => {
     if (!token) return;
 
     const fetchData = async () => {
       try {
+        // Busca o buffer da RAM do servidor (últimos 50 pontos)
         const response = await axios.get<DadosSensor[]>(`${API_URL}/api/telemetria`);
         const novosDados = response.data;
         setData(novosDados);
 
+        // Cálculos matemáticos locais (Integração no tempo)
         if (novosDados.length > 0) {
           const ultimo = novosDados[novosDados.length - 1];
           const agora = Date.now();
-          const deltaTempoHoras = (agora - lastUpdateRef.current) / 1000 / 3600;
+          const deltaTempoHoras = (agora - lastUpdateRef.current) / 1000 / 3600; // Delta em horas
 
+          // Só calcula se o delta for razoável (evita saltos grandes se a aba ficar inativa)
           if (deltaTempoHoras > 0 && deltaTempoHoras < 0.1) {
             setMetricas(prev => {
-              const pi = ultimo.tensao * ultimo.corrente;
-              const ne = prev.energiaTotal + (pi * deltaTempoHoras);
-              const nd = prev.distanciaTotal + (ultimo.velocidade * deltaTempoHoras);
-              const nt = prev.tempoDecorrido + deltaTempoHoras;
+              const potenciaInstantanea = ultimo.tensao * ultimo.corrente;
+              
+              // Energia (Wh) = Potência (W) * Tempo (h)
+              const novaEnergia = prev.energiaTotal + (potenciaInstantanea * deltaTempoHoras);
+              
+              // Distância (km) = Velocidade (km/h) * Tempo (h)
+              const novaDistancia = prev.distanciaTotal + (ultimo.velocidade * deltaTempoHoras);
+              
+              const novoTempo = prev.tempoDecorrido + deltaTempoHoras;
+
               return {
-                distanciaTotal: nd,
-                energiaTotal: ne,
-                tempoDecorrido: nt,
-                velocidadeMedia: nt > 0 ? nd / nt : 0,
-                consumoMedio: nd > 0.001 ? ne / nd : 0
+                distanciaTotal: novaDistancia,
+                energiaTotal: novaEnergia,
+                tempoDecorrido: novoTempo,
+                velocidadeMedia: novoTempo > 0 ? novaDistancia / novoTempo : 0,
+                consumoMedio: novaDistancia > 0.001 ? novaEnergia / novaDistancia : 0
               };
             });
           }
@@ -132,7 +138,8 @@ function App() {
     };
 
     if (currentScreen === 'dashboard') {
-      const interval = setInterval(fetchData, 1000); // Poll a cada 1s
+      // 🚀 TURBO MODE: 200ms (5 atualizações por segundo)
+      const interval = setInterval(fetchData, 200); 
       return () => clearInterval(interval);
     }
   }, [token, currentScreen]);
@@ -157,19 +164,42 @@ function App() {
     }
   };
 
+  // --- NOVA LÓGICA DE GRAVAÇÃO (Backend Start/Stop) ---
   const gerenciarGravacao = async () => {
     if (!gravando) {
-      setHoraInicio(pegarHoraLocal());
-      setGravando(true);
-    } else {
-      const horaFim = pegarHoraLocal();
-      setGravando(false);
-      const nomeSessao = prompt("Nome da Sessão:", `Sessão ${new Date().toLocaleTimeString()}`);
+      // INICIAR: Pede o nome ANTES
+      const nomeSessao = prompt("Nome para a gravação:", `Treino ${new Date().toLocaleTimeString()}`);
+      if (nomeSessao === null) return; // Cancelou
+
       try {
-        await axios.post(`${API_URL}/api/sessions`, { nome: nomeSessao, inicio: horaInicio, fim: horaFim });
-        alert("Salvo!");
+        // Avisa o servidor para começar a salvar no banco
+        await axios.post(`${API_URL}/api/sessions/start`, { nome: nomeSessao });
+        setGravando(true);
+        
+        // ZERA AS MÉTRICAS AO INICIAR NOVA GRAVAÇÃO
+        setMetricas({
+           distanciaTotal: 0,
+           energiaTotal: 0,
+           tempoDecorrido: 0,
+           velocidadeMedia: 0,
+           consumoMedio: 0
+        });
+        
       } catch (error) {
-        alert("Erro.");
+        console.error(error);
+        alert("Erro ao iniciar gravação no servidor.");
+      }
+
+    } else {
+      // PARAR
+      try {
+        // Avisa o servidor para parar
+        await axios.post(`${API_URL}/api/sessions/stop`);
+        setGravando(false);
+        alert("Gravação Finalizada e Salva com Sucesso!");
+      } catch (error) {
+        console.error(error);
+        alert("Erro ao finalizar gravação.");
       }
     }
   };
@@ -179,7 +209,6 @@ function App() {
     setMobileMenuOpen(false);
   };
 
-  // --- LOGIN E ATUALIZAÇÃO ---
   const handleLoginSuccess = (t: string, name: string, avatar: string | null) => {
     setToken(t);
     setUserName(name);
@@ -194,28 +223,15 @@ function App() {
     localStorage.setItem('userAvatar', newUrl);
   };
 
-  // --- FUNÇÃO DE ALERTAS ESTILIZADOS ---
+  // --- ALERTAS ---
   const renderWarning = (tipo: string, valor: number) => {
     let mensagem = "";
     let Icone = AlertTriangle;
 
-    // Regras de Alerta (Ajuste os valores conforme necessário)
-    if (tipo === 'temperatura' && valor > 50) {
-      mensagem = "Superaquecimento!";
-      Icone = Flame;
-    }
-    else if (tipo === 'velocidade' && valor > 90) {
-      mensagem = "Excesso de Velocidade!";
-      Icone = Activity;
-    }
-    else if (tipo === 'corrente' && valor > 40) {
-      mensagem = "Sobrecarga de Corrente!";
-      Icone = Zap;
-    }
-    else if (tipo === 'tensao' && valor > 85) {
-      mensagem = "Tensão Crítica!";
-      Icone = AlertTriangle;
-    }
+    if (tipo === 'temperatura' && valor > 50) { mensagem = "Superaquecimento!"; Icone = Flame; }
+    else if (tipo === 'velocidade' && valor > 90) { mensagem = "Excesso de Velocidade!"; Icone = Activity; }
+    else if (tipo === 'corrente' && valor > 40) { mensagem = "Sobrecarga de Corrente!"; Icone = Zap; }
+    else if (tipo === 'tensao' && valor > 85) { mensagem = "Tensão Crítica!"; Icone = AlertTriangle; }
 
     if (!mensagem) return null;
 
@@ -226,7 +242,6 @@ function App() {
       </div>
     );
   };
-  // ---------------------------------------------
 
   if (!token) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
@@ -242,21 +257,16 @@ function App() {
       <aside className={`sidebar ${mobileMenuOpen ? 'open' : ''}`}>
         <div className="brand" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '5px', marginBottom: '30px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', justifyContent: 'space-between' }}>
-
-            {/* --- ÁREA DA LOGO AJUSTADA (BEM MAIOR) --- */}
+            {/* LOGO */}
             <img
               src="/3.png"
               alt="Logo IFECO"
-              // AQUI ESTÁ A MUDANÇA: width: 160px e height: auto
               style={{ width: '110px', height: 'auto', objectFit: 'contain' }}
               onError={(e) => {
                 e.currentTarget.onerror = null;
-                // Fallback maior também
                 e.currentTarget.src = 'https://placehold.co/200x80/1e9e53/ffffff?text=IFECO+IoT&font=montserrat';
               }}
             />
-            {/* ----------------------------------------- */}
-
             <button className="sidebar-close-btn" onClick={() => setMobileMenuOpen(false)}> <X size={24} /> </button>
           </div>
           <div style={{ marginTop: '20px', padding: '12px', background: 'rgba(255,255,255,0.1)', borderRadius: '12px', width: '100%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -284,18 +294,37 @@ function App() {
                 {currentScreen === 'dashboard' ? (
                   <>
                     <h1>{getGreeting()}</h1>
-                    <span>Atualização: 500ms (0.5s)</span>
+                    {/* Alteração 1: Texto de Atualização */}
+                    <span>Monitoramento em Tempo Real (Atualização: 200ms)</span>
                   </>
                 ) : (
-                  <> <h1>Histórico de Sessões</h1> <span>Análise de dados</span> </>
+                  <> <h1>Histórico de Sessões</h1> <span>Análise de dados gravados</span> </>
                 )}
               </div>
             </div>
+            
             {currentScreen === 'dashboard' && (
               <div className="header-actions">
-                <div className="status-badge"><div className={`dot ${gravando ? 'rec' : 'online'}`} />{gravando ? 'REC' : 'ON'}</div>
-                <button className={`btn ${gravando ? 'btn-rec recording' : 'btn-rec'}`} onClick={gerenciarGravacao}>{gravando ? <Square size={18} /> : <Save size={18} />} {gravando ? 'Salvar' : 'Gravar'}</button>
-                <button className={`btn ${motorLigado ? 'btn-danger' : 'btn-primary'}`} onClick={alternarMotor}><Play size={18} fill={motorLigado ? "currentColor" : "none"} /> {motorLigado ? 'Parar' : 'Ligar'}</button>
+                {/* Alteração 2: Botão CSV Removido */}
+
+                <div className="status-badge">
+                    <div className={`dot ${gravando ? 'rec' : 'online'}`} />
+                    {gravando ? 'GRAVANDO' : 'AO VIVO'}
+                </div>
+                
+                {/* Alteração 3: Texto Gravar Sessão */}
+                <button 
+                    className={`btn ${gravando ? 'btn-rec recording' : 'btn-rec'}`} 
+                    onClick={gerenciarGravacao}
+                >
+                    {gravando ? <Square size={18} /> : <Save size={18} />} 
+                    {gravando ? 'Parar Gravação' : 'Gravar Sessão'}
+                </button>
+                
+                {/* Alteração 4: Texto Teste ESP32 */}
+                <button className={`btn ${motorLigado ? 'btn-danger' : 'btn-primary'}`} onClick={alternarMotor}>
+                    <Play size={18} fill={motorLigado ? "currentColor" : "none"} /> {motorLigado ? 'Parar Teste' : 'Teste ESP32'}
+                </button>
               </div>
             )}
           </header>
@@ -310,7 +339,7 @@ function App() {
           // --- DASHBOARD PRINCIPAL ---
           <>
             <div style={{ marginBottom: '24px', marginTop: '10px' }}>
-              <h3 style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}> <Calculator size={18} /> Sessão Atual </h3>
+              <h3 style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}> <Calculator size={18} /> Métricas da Sessão Atual </h3>
               <div className="grid-container">
                 <div className="card" style={{ background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%)', color: 'white', border: 'none' }}>
                   <div className="card-header" style={{ marginBottom: '10px' }}><div className="card-title" style={{ color: 'rgba(255,255,255,0.8)' }}><Zap size={20} /> Consumo</div></div>
@@ -322,7 +351,7 @@ function App() {
               </div>
             </div>
 
-            <h3 style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '12px', marginTop: '20px' }}>Sensores</h3>
+            <h3 style={{ fontSize: '1rem', color: 'var(--text-secondary)', marginBottom: '12px', marginTop: '20px' }}>Leitura dos Sensores (Ao Vivo)</h3>
             <div className="grid-container">
 
               {/* --- CARD VELOCIDADE --- */}
@@ -341,7 +370,7 @@ function App() {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
                     <Tooltip contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-main)' }} />
-                    <Area type="monotone" dataKey="velocidade" stroke="#1e9e53" fillOpacity={1} fill="url(#colorVel)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="velocidade" stroke="#1e9e53" fillOpacity={1} fill="url(#colorVel)" strokeWidth={2} isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
                 {renderWarning('velocidade', ultimoDado.velocidade)}
@@ -356,8 +385,9 @@ function App() {
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={data}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                    <YAxis domain={['auto', 'auto']} hide={true} />
                     <Tooltip contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-main)' }} />
-                    <Line type="monotone" dataKey="tensao" stroke="#f59e0b" strokeWidth={3} dot={false} />
+                    <Line type="monotone" dataKey="tensao" stroke="#f59e0b" strokeWidth={3} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
                 {renderWarning('tensao', ultimoDado.tensao)}
@@ -372,8 +402,9 @@ function App() {
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={data}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                    <YAxis domain={['auto', 'auto']} hide={true} />
                     <Tooltip contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-main)' }} />
-                    <Line type="monotone" dataKey="corrente" stroke="#ef4444" strokeWidth={3} dot={false} />
+                    <Line type="monotone" dataKey="corrente" stroke="#ef4444" strokeWidth={3} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
                 {renderWarning('corrente', ultimoDado.corrente)}
@@ -388,8 +419,9 @@ function App() {
                 <ResponsiveContainer width="100%" height={200}>
                   <LineChart data={data}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                    <YAxis domain={['auto', 'auto']} hide={true} />
                     <Tooltip contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-main)' }} />
-                    <Line type="monotone" dataKey="temperatura" stroke="#3b82f6" strokeWidth={3} dot={false} />
+                    <Line type="monotone" dataKey="temperatura" stroke="#3b82f6" strokeWidth={3} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
                 {renderWarning('temperatura', ultimoDado.temperatura)}
