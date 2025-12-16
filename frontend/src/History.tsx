@@ -5,7 +5,7 @@ import { Calendar, Clock, Activity, Download, MousePointerClick, AlertCircle } f
 import './App.css';
 
 // SEU IP CONFIGURADO
-const API_URL = 'http://192.168.0.15:3001'; 
+const API_URL = 'http://172.29.110.52:3001';
 
 interface Session {
     id: number;

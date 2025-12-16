@@ -63,7 +63,7 @@ const Leitura = sequelize.define('Leitura', {
 sequelize.sync({ alter: true }).then(() => console.log('Banco de Dados Sincronizado!'));
 
 // --- 2. MQTT ---
-const mqttClient = mqtt.connect('mqtt://192.168.0.15'); // SEU IP
+const mqttClient = mqtt.connect('mqtt://172.29.110.52'); // SEU IP
 const TOPICO_TELEMETRIA = 'esp32/painel/telemetria';
 const TOPICO_COMANDO = 'esp32/painel/comando';
 
